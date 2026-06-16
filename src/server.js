@@ -1,5 +1,6 @@
-const path = require('path');
 const dotenv = require('dotenv');
+const path = require('path');
+
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
