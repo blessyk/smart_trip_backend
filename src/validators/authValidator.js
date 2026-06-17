@@ -19,6 +19,13 @@ const registerValidator = [
     .withMessage('Please provide a valid email address')
     .normalizeEmail(),
 
+  body('phone')
+    .trim()
+    .notEmpty()
+    .withMessage('Phone number is required')
+    .matches(/^\d{10}$/)
+    .withMessage('Phone number must be exactly 10 digits'),
+
   body('password')
     .notEmpty()
     .withMessage('Password is required')
@@ -85,6 +92,12 @@ const updateProfileValidator = [
     .trim()
     .matches(/^\d{12}$/)
     .withMessage('Aadhar number must be exactly 12 digits'),
+
+  body('phone')
+    .optional()
+    .trim()
+    .matches(/^\d{10}$/)
+    .withMessage('Phone number must be exactly 10 digits'),
 ];
 
 module.exports = {

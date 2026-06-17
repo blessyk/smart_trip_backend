@@ -1,4 +1,8 @@
 .env
 node_modules/
 data/
-postman/
+
+# Uploads and system files
+uploads/
+.DS_Store
+*.log

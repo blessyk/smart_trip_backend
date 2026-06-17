@@ -9,12 +9,20 @@ const generateToken = require('../utils/generateToken');
  */
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, aadharNumber, role } = req.body;
+    const { name, email, password, aadharNumber, role, phone } = req.body;
 
     // Check if email already exists
     const emailExists = await User.findOne({ email });
     if (emailExists) {
       return next(new ApiError(409, 'Email already registered'));
+    }
+
+    // Check if Phone number already exists
+    if (phone) {
+      const phoneExists = await User.findOne({ phone });
+      if (phoneExists) {
+        return next(new ApiError(409, 'Phone number already registered'));
+      }
     }
 
     // Check if Aadhar number already exists
@@ -30,6 +38,7 @@ const register = async (req, res, next) => {
       password,
       aadharNumber,
       role: role || 'user',
+      phone,
     });
 
     // Send success response excluding password
@@ -38,6 +47,7 @@ const register = async (req, res, next) => {
       name: user.name,
       email: user.email,
       aadharNumber: user.aadharNumber,
+      phone: user.phone,
       role: user.role,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -85,6 +95,7 @@ const login = async (req, res, next) => {
       name: user.name,
       email: user.email,
       aadharNumber: user.aadharNumber,
+      phone: user.phone,
       role: user.role,
     };
 
@@ -138,7 +149,7 @@ const updateProfile = async (req, res, next) => {
       return next(new ApiError(404, 'User not found'));
     }
 
-    const { name, email, aadharNumber } = req.body;
+    const { name, email, aadharNumber, phone } = req.body;
 
     // If email is changing, check uniqueness
     if (email && email !== user.email) {
@@ -147,6 +158,15 @@ const updateProfile = async (req, res, next) => {
         return next(new ApiError(409, 'Email already registered'));
       }
       user.email = email;
+    }
+
+    // If phone is changing, check uniqueness
+    if (phone && phone !== user.phone) {
+      const phoneExists = await User.findOne({ phone });
+      if (phoneExists) {
+        return next(new ApiError(409, 'Phone number already registered'));
+      }
+      user.phone = phone;
     }
 
     // If Aadhar number is changing, check uniqueness
@@ -171,6 +191,7 @@ const updateProfile = async (req, res, next) => {
       name: updatedUser.name,
       email: updatedUser.email,
       aadharNumber: updatedUser.aadharNumber,
+      phone: updatedUser.phone,
       role: updatedUser.role,
       createdAt: updatedUser.createdAt,
       updatedAt: updatedUser.updatedAt,

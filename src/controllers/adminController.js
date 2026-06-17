@@ -8,10 +8,38 @@ const ApiError = require('../utils/ApiError');
  */
 const getAllUsers = async (req, res, next) => {
   try {
-    const users = await User.find().select('-password');
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const search = req.query.search || '';
+    const startIndex = (page - 1) * limit;
+
+    let query = {};
+    if (search) {
+      query = {
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { aadharNumber: { $regex: search, $options: 'i' } },
+          { phone: { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+
+    const total = await User.countDocuments(query);
+    const users = await User.find(query)
+      .select('-password')
+      .skip(startIndex)
+      .limit(limit);
+
     res.status(200).json({
       success: true,
       message: 'Users retrieved successfully',
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      },
       data: {
         users,
       },

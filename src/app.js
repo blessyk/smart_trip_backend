@@ -2,9 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const destinationRoutes = require('./routes/destinationRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const testimonialRoutes = require('./routes/testimonialRoutes');
+const contactRoutes = require('./routes/contactRoutes');
 const errorMiddleware = require('./middleware/errorMiddleware');
 const ApiError = require('./utils/ApiError');
 
@@ -62,9 +67,16 @@ const loginLimiter = rateLimit({
 
 app.use('/api/auth/login', loginLimiter);
 
+// Serve static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/destinations', destinationRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/testimonials', testimonialRoutes);
+app.use('/api/contacts', contactRoutes);
 
 // Fallback for undefined routes
 app.use((req, res, next) => {
