@@ -10,6 +10,8 @@ const destinationRoutes = require('./routes/destinationRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const testimonialRoutes = require('./routes/testimonialRoutes');
 const contactRoutes = require('./routes/contactRoutes');
+const tripRoutes = require('./routes/tripRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const errorMiddleware = require('./middleware/errorMiddleware');
 const ApiError = require('./utils/ApiError');
 
@@ -77,6 +79,8 @@ app.use('/api/destinations', destinationRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/testimonials', testimonialRoutes);
 app.use('/api/contacts', contactRoutes);
+app.use('/api/trips', tripRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Fallback for undefined routes
 app.use((req, res, next) => {

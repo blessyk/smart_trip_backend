@@ -3,7 +3,12 @@ const {
   getAllUsers,
   getUserById,
   deleteUser,
+  getAiLogs,
+  getGeminiModelSetting,
+  updateGeminiModelSetting,
+  getAvailableGeminiModels
 } = require('../controllers/adminController');
+const { getAllTrips } = require('../controllers/tripController');
 const { protect } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
 
@@ -16,5 +21,12 @@ router.use(authorize('admin'));
 router.get('/users', getAllUsers);
 router.get('/users/:id', getUserById);
 router.delete('/users/:id', deleteUser);
+
+router.get('/trips', getAllTrips);
+router.get('/ai-logs', getAiLogs);
+
+router.get('/settings/gemini-model', getGeminiModelSetting);
+router.put('/settings/gemini-model', updateGeminiModelSetting);
+router.get('/settings/gemini-available-models', getAvailableGeminiModels);
 
 module.exports = router;
