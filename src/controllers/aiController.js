@@ -3,6 +3,227 @@ const AiLog = require('../models/AiLog');
 const Setting = require('../models/Setting');
 const ApiError = require('../utils/ApiError');
 
+// In-memory caches for Nominatim and Open-Meteo API requests
+const coordsCache = new Map();
+const weatherCache = new Map();
+
+// OpenAPI 3.0 Schemas for Gemini Structured JSON output
+const tripSchema = {
+  type: "object",
+  properties: {
+    itinerary: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          day: { type: "integer" },
+          date: { type: "string" },
+          schedule: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                time: { type: "string" },
+                activity: { type: "string" },
+                description: { type: "string" }
+              },
+              required: ["time", "activity", "description"]
+            }
+          }
+        },
+        required: ["day", "date", "schedule"]
+      }
+    },
+    recommendedHotels: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          hotelName: { type: "string" },
+          rating: { type: "number" },
+          estimatedCost: { type: "integer" },
+          location: { type: "string" },
+          reasonForRecommendation: { type: "string" }
+        },
+        required: ["hotelName", "rating", "estimatedCost", "location", "reasonForRecommendation"]
+      }
+    },
+    recommendedRestaurants: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          restaurantName: { type: "string" },
+          cuisine: { type: "string" },
+          estimatedCost: { type: "integer" },
+          specialty: { type: "string" }
+        },
+        required: ["restaurantName", "cuisine", "estimatedCost", "specialty"]
+      }
+    },
+    attractions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          placeName: { type: "string" },
+          category: { type: "string" },
+          bestTimeToVisit: { type: "string" },
+          estimatedDuration: { type: "string" },
+          entryFee: { type: "integer" },
+          distanceFromDestination: { type: "string" }
+        },
+        required: ["placeName", "category", "bestTimeToVisit", "estimatedDuration"]
+      }
+    },
+    budgetBreakdown: {
+      type: "object",
+      properties: {
+        accommodationBudget: { type: "integer" },
+        foodBudget: { type: "integer" },
+        transportationBudget: { type: "integer" },
+        activityBudget: { type: "integer" },
+        emergencyBudget: { type: "integer" }
+      },
+      required: ["accommodationBudget", "foodBudget", "transportationBudget", "activityBudget", "emergencyBudget"]
+    },
+    weatherInfo: {
+      type: "object",
+      properties: {
+        forecast: { type: "string" },
+        warnings: { type: "string" },
+        recommendations: { type: "string" }
+      },
+      required: ["forecast", "warnings", "recommendations"]
+    },
+    sentimentAnalysis: {
+      type: "object",
+      properties: {
+        averageHotelRating: { type: "number" },
+        overallSentiment: { type: "string" }
+      },
+      required: ["averageHotelRating", "overallSentiment"]
+    },
+    riskAnalysis: {
+      type: "object",
+      properties: {
+        riskLevel: { type: "string" },
+        reason: { type: "string" },
+        recommendation: { type: "string" }
+      },
+      required: ["riskLevel", "reason", "recommendation"]
+    }
+  },
+  required: [
+    "itinerary",
+    "recommendedHotels",
+    "recommendedRestaurants",
+    "attractions",
+    "budgetBreakdown",
+    "weatherInfo",
+    "sentimentAnalysis",
+    "riskAnalysis"
+  ]
+};
+
+const attractionsSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      type: { type: "string" },
+      description: { type: "string" },
+      rating: { type: "number" },
+      imageSearchQuery: { type: "string" },
+      highlights: {
+        type: "array",
+        items: { type: "string" }
+      },
+      bestTime: { type: "string" },
+      fee: { type: "string" }
+    },
+    required: ["name", "type", "description", "rating", "imageSearchQuery", "highlights", "bestTime", "fee"]
+  }
+};
+
+const hotelsSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      type: { type: "string" },
+      description: { type: "string" },
+      rating: { type: "number" },
+      imageSearchQuery: { type: "string" },
+      priceRange: { type: "string" },
+      amenities: {
+        type: "array",
+        items: { type: "string" }
+      },
+      locationSummary: { type: "string" }
+    },
+    required: ["name", "type", "description", "rating", "imageSearchQuery", "priceRange", "amenities", "locationSummary"]
+  }
+};
+
+const foodSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      type: { type: "string" },
+      description: { type: "string" },
+      rating: { type: "number" },
+      imageSearchQuery: { type: "string" },
+      priceRange: { type: "string" },
+      recommendedPlaces: {
+        type: "array",
+        items: { type: "string" }
+      },
+      keyIngredients: {
+        type: "array",
+        items: { type: "string" }
+      }
+    },
+    required: ["name", "type", "description", "rating", "imageSearchQuery", "priceRange", "recommendedPlaces", "keyIngredients"]
+  }
+};
+
+const itinerarySchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    overview: { type: "string" },
+    days: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          day: { type: "integer" },
+          theme: { type: "string" },
+          activities: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                time: { type: "string" },
+                name: { type: "string" },
+                description: { type: "string" }
+              },
+              required: ["time", "name", "description"]
+            }
+          }
+        },
+        required: ["day", "theme", "activities"]
+      }
+    }
+  },
+  required: ["title", "overview", "days"]
+};
+
 /**
  * Audit log helper to write AI call request and response logs.
  */
@@ -25,6 +246,12 @@ async function logAiCall({ userId, endpoint, requestPayload, responsePayload, st
  * Helper to fetch coordinates from OpenStreetMap Nominatim API.
  */
 async function getCoordinates(destination) {
+  const cacheKey = destination.toLowerCase().trim();
+  if (coordsCache.has(cacheKey)) {
+    console.log(`[Cache Hit] Location coordinates resolved from cache: ${destination}`);
+    return coordsCache.get(cacheKey);
+  }
+
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(destination)}&format=json&limit=1`,
@@ -36,23 +263,33 @@ async function getCoordinates(destination) {
     );
     const data = await response.json();
     if (data && data.length > 0) {
-      return {
+      const result = {
         lat: parseFloat(data[0].lat),
         lon: parseFloat(data[0].lon),
         displayName: data[0].display_name
       };
+      coordsCache.set(cacheKey, result);
+      return result;
     }
   } catch (err) {
     console.error('Error fetching coordinates:', err);
   }
   // Default fallback (e.g. Paris center)
-  return { lat: 48.8566, lon: 2.3522, displayName: destination };
+  const fallback = { lat: 48.8566, lon: 2.3522, displayName: destination };
+  coordsCache.set(cacheKey, fallback);
+  return fallback;
 }
 
 /**
  * Helper to fetch weather forecast from Open-Meteo API.
  */
 async function getWeatherForecast(lat, lon, startDate, endDate) {
+  const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)},${startDate},${endDate}`;
+  if (weatherCache.has(cacheKey)) {
+    console.log(`[Cache Hit] Weather forecast resolved from cache: ${cacheKey}`);
+    return weatherCache.get(cacheKey);
+  }
+
   try {
     const response = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`
@@ -93,21 +330,26 @@ async function getWeatherForecast(lat, lon, startDate, endDate) {
         recommendationSummary = `Carry umbrellas/raincoats. Arrange indoor activities (museums, shopping, cafes) on rainy days.`;
       }
       
-      return {
+      const result = {
         forecast: forecastSummary,
         warnings: warningSummary,
         recommendations: recommendationSummary,
         rawDaily: daily
       };
+      weatherCache.set(cacheKey, result);
+      return result;
     }
   } catch (err) {
     console.error('Error fetching weather:', err);
   }
-  return {
+
+  const fallback = {
     forecast: 'Standard weather forecast (22°C - 28°C, sunny)',
     warnings: 'No severe weather warnings active.',
     recommendations: 'Wear light clothing. Carry sunglasses and sunscreen.'
   };
+  weatherCache.set(cacheKey, fallback);
+  return fallback;
 }
 
 /**
@@ -276,33 +518,41 @@ function generateMockTripResponse(params, weather) {
 /**
  * Call Gemini API using generateContent.
  */
-async function callGemini(systemPrompt, userPrompt) {
+async function callGemini(systemPrompt, userPrompt, responseSchema = null) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not defined in env');
   }
 
-  let modelName = 'gemini-flash-latest'; // default
+  let configuredModelName = 'gemini-flash-latest'; // default
   try {
     const modelSetting = await Setting.findOne({ key: 'GEMINI_MODEL' });
     if (modelSetting && modelSetting.value) {
-      modelName = modelSetting.value;
+      configuredModelName = modelSetting.value;
     }
   } catch (err) {
     console.error('Error fetching GEMINI_MODEL setting, using fallback model:', err);
   }
 
-  // Strip 'models/' prefix if it exists to avoid duplicate prefixing
-  const cleanModelName = modelName.startsWith('models/') ? modelName.substring(7) : modelName;
+  // Clean primary model name
+  const cleanModelName = configuredModelName.startsWith('models/') ? configuredModelName.substring(7) : configuredModelName;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent?key=${apiKey}`;
+  // Build the fallback chain of models
+  const modelChain = [cleanModelName];
+  const defaults = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+  for (const m of defaults) {
+    if (!modelChain.includes(m)) {
+      modelChain.push(m);
+    }
+  }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  let lastError = null;
+
+  for (let mIndex = 0; mIndex < modelChain.length; mIndex++) {
+    const modelName = modelChain[mIndex];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+    const requestBody = {
       contents: [
         {
           role: 'user',
@@ -314,32 +564,89 @@ async function callGemini(systemPrompt, userPrompt) {
       },
       generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.7
+        temperature: 0.7,
+        ...(responseSchema && { responseSchema })
       }
-    })
-  });
+    };
 
-  if (!response.ok) {
-    const errText = await response.text();
-    let errorMessage = `Gemini API error: ${response.status} - ${errText}`;
-    try {
-      const parsedError = JSON.parse(errText);
-      if (parsedError.error && parsedError.error.message) {
-        errorMessage = `Gemini API error (${response.status}): ${parsedError.error.message}`;
+    const maxRetries = 3;
+    let delay = 1000;
+    let success = false;
+    let result = null;
+
+    console.log(`[Gemini Request] Routing to model: ${modelName}`);
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          let errorMessage = `Gemini API error: ${response.status} - ${errText}`;
+          try {
+            const parsedError = JSON.parse(errText);
+            if (parsedError.error && parsedError.error.message) {
+              errorMessage = `Gemini API error (${response.status}): ${parsedError.error.message}`;
+            }
+          } catch (parseErr) {
+            // Keep original message if parsing fails
+          }
+
+          // Check if this error is transient
+          const isTransient = response.status === 503 || response.status === 429;
+          if (isTransient && attempt < maxRetries) {
+            console.warn(`[Transient Error ${response.status}] Attempt ${attempt} failed for model ${modelName}. Retrying in ${delay}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay *= 2;
+            continue;
+          }
+
+          throw new Error(errorMessage);
+        }
+
+        const jsonResult = await response.json();
+        if (!jsonResult.candidates || !jsonResult.candidates[0]?.content?.parts?.[0]?.text) {
+          throw new Error('Gemini API returned no text output');
+        }
+
+        const text = jsonResult.candidates[0].content.parts[0].text;
+        result = JSON.parse(text);
+        success = true;
+        break;
+
+      } catch (err) {
+        lastError = err;
+        // Check if this error is a network failure
+        const isNetworkError = err.name === 'FetchError' || err.code === 'ENOTFOUND' || err.message.includes('fetch failed');
+        if (isNetworkError && attempt < maxRetries) {
+          console.warn(`[Network Error] Attempt ${attempt} failed for model ${modelName}. Retrying in ${delay}ms...`, err.message);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+        
+        // If it's a non-retriable error (or max retries reached), break this inner loop to try next model
+        break;
       }
-    } catch (parseErr) {
-      // Keep original message if parsing fails
     }
-    throw new Error(errorMessage);
+
+    if (success) {
+      return result;
+    }
+
+    // Model failed, try the next one if available
+    if (mIndex < modelChain.length - 1) {
+      console.warn(`[Model Failure] ${modelName} failed. Falling back to next model: ${modelChain[mIndex + 1]}. Error: ${lastError.message}`);
+    }
   }
 
-  const result = await response.json();
-  if (!result.candidates || !result.candidates[0]?.content?.parts?.[0]?.text) {
-    throw new Error('Gemini API returned no text output');
-  }
-
-  const text = result.candidates[0].content.parts[0].text;
-  return JSON.parse(text);
+  throw lastError || new Error('Max retries and fallback options exceeded without response');
 }
 
 /**
@@ -463,7 +770,7 @@ Details:
 - Weather context fetched: Forecast: "${weather.forecast}", Warnings: "${weather.warnings}", Recommendations: "${weather.recommendations}". Take this forecast into account, substituting outdoor plans for indoor plans if rainfall is expected.`;
 
     if (process.env.GEMINI_API_KEY) {
-      tripData = await callGemini(systemPrompt, userPrompt);
+      tripData = await callGemini(systemPrompt, userPrompt, tripSchema);
     } else {
       throw new ApiError(400, 'GEMINI_API_KEY is not configured on the server');
     }
@@ -585,7 +892,7 @@ Modify this JSON strictly based on the user's chat requests. Keep the exact outp
 
         const userPrompt = `My change request: "${message}". Regenerate the trip and update budget breakdowns, itinerary schedules, hotels, restaurants, or risk levels as appropriate. Return only the JSON object.`;
         
-        updatedTripData = await callGemini(systemPrompt, userPrompt);
+        updatedTripData = await callGemini(systemPrompt, userPrompt, tripSchema);
       } catch (err) {
         console.error('Gemini Chat error:', err);
         throw err;
@@ -972,7 +1279,13 @@ You MUST respond ONLY with a valid JSON object or JSON array matching the schema
 
     let parsedData;
     if (process.env.GEMINI_API_KEY) {
-      parsedData = await callGemini(systemPrompt, prompt);
+      let schema = null;
+      if (category === 'hotels') schema = hotelsSchema;
+      else if (category === 'food') schema = foodSchema;
+      else if (category === 'attractions') schema = attractionsSchema;
+      else if (category === 'itinerary') schema = itinerarySchema;
+
+      parsedData = await callGemini(systemPrompt, prompt, schema);
     } else {
       throw new ApiError(400, 'GEMINI_API_KEY is not configured on the server');
     }
